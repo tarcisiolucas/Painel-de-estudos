@@ -7,43 +7,36 @@ import json
 import re
 import google.generativeai as genai
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
-
-# Carrega as variáveis do arquivo .env
-load_dotenv()
+from streamlit_gsheets import GSheetsConnection
 
 # Configuração da página
 st.set_page_config(page_title="Heatmap de Estudos", layout="wide")
 st.title("📚 Meu Painel de Estudos com IA (Petrobras - Ênfase 12)")
 
 # ==========================================
-# VARIÁVEIS DE SESSÃO (Para o Cronômetro)
+# VARIÁVEIS DE SESSÃO E CONEXÕES
 # ==========================================
 if 'timer_rodando' not in st.session_state:
     st.session_state.timer_rodando = False
     st.session_state.inicio_timer = None
     st.session_state.horas_cronometradas = 0.0
 
-# ==========================================
-# CONFIGURAÇÕES IMPORTANTES
-# ==========================================
-ARQUIVO_DADOS = "historico_estudos.csv"
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+URL_PLANILHA = st.secrets["spreadsheet"]
+
+# Conexão com o Google Sheets
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 def carregar_dados():
-    if not os.path.exists(ARQUIVO_DADOS):
-        df = pd.DataFrame(columns=["Data", "Meta", "Categoria", "Assunto", "Horas"])
-        df.to_csv(ARQUIVO_DADOS, index=False)
+    try:
+        # ttl=0 obriga a ler a planilha em tempo real sempre
+        df = conn.read(spreadsheet=URL_PLANILHA, worksheet="Página1", ttl=0)
+        # Limpa linhas vazias caso o Sheets crie acidentalmente
+        df = df.dropna(subset=["Data", "Assunto"])
         return df
-    
-    df = pd.read_csv(ARQUIVO_DADOS)
-    if "Meta" not in df.columns:
-        df["Meta"] = "Meta Não Definida"
-        if "Categoria" not in df.columns:
-            df["Categoria"] = "Geral (Sem IA)"
-        df = df[["Data", "Meta", "Categoria", "Assunto", "Horas"]]
-        df.to_csv(ARQUIVO_DADOS, index=False)
-    return df
+    except Exception as e:
+        st.error(f"Erro ao ler a planilha: {e}")
+        return pd.DataFrame(columns=["Data", "Meta", "Categoria", "Assunto", "Horas"])
 
 df = carregar_dados()
 
@@ -62,7 +55,6 @@ def classificar_com_ia(texto_estudo, horas_padrao, api_key):
         Entrada do usuário: "{texto_estudo}"
 
         === CRONOGRAMA OFICIAL (USE ESTAS REFERÊNCIAS PARA A "Meta" E A "Categoria") ===
-
         [PORTUGUÊS - Categoria: PORT]
         Metas 01 a 03: Fonologia, Acentuação Gráfica, Ortografia, Significação das Palavras, Hífen.
         Metas 04 a 18: Estrutura e Formação das Palavras, Morfologia (Substantivos, Artigos, Conjunções, Preposição, Numerais, Interjeição, Adjetivos, Pronomes, Verbos, Advérbios).
@@ -101,28 +93,23 @@ def classificar_com_ia(texto_estudo, horas_padrao, api_key):
 
         INSTRUÇÕES DE EXECUÇÃO:
         1. Identifique cada assunto estudado na "Entrada do usuário".
-        2. Para cada assunto, cruze com o "CRONOGRAMA OFICIAL" para encontrar a Categoria (PORT, ING ou ELET) e estime o número exato da Meta.
-        3. Identifique as horas gastas. Se não estiverem no texto, pegue as {horas_padrao} horas padrão e divida-as proporcionalmente.
+        2. Para cada assunto, cruze com o "CRONOGRAMA OFICIAL" para encontrar a Categoria (PORT, ING ou ELET) e estime a Meta.
+        3. Identifique as horas gastas. Se não estiverem no texto, divida {horas_padrao} horas proporcionalmente.
         
-        SAÍDA OBRIGATÓRIA:
-        Responda ESTRITAMENTE em formato JSON (uma lista de objetos). Não escreva NADA além do JSON.
-        Formato obrigatório:
+        SAÍDA OBRIGATÓRIA (JSON ESTrito):
         [
-          {{"Meta": "Meta 13", "Categoria": "ELET", "Assunto": "Eletrônica de Potência - Retificadores", "Horas": 2.0}},
-          {{"Meta": "Meta 40", "Categoria": "PORT", "Assunto": "Crase", "Horas": 0.5}}
+          {{"Meta": "Meta 13", "Categoria": "ELET", "Assunto": "Eletrônica de Potência - Retificadores", "Horas": 2.0}}
         ]
         """
-        
         resposta = model.generate_content(prompt).text.strip()
         match = re.search(r'\[.*\]', resposta, re.DOTALL)
         if match:
             return json.loads(match.group(0))
         else:
             raise ValueError("JSON não encontrado na resposta.")
-            
     except Exception as e:
         print(f"\n===== ERRO DA IA =====\n{e}\n======================\n")
-        return [{"Meta": "Erro de IA", "Categoria": "Geral (Sem IA)", "Assunto": texto_estudo, "Horas": horas_padrao}]
+        return [{"Meta": "Erro de IA", "Categoria": "Geral", "Assunto": texto_estudo, "Horas": horas_padrao}]
 
 # ==========================================
 # BARRA LATERAL: CRONÔMETRO
@@ -158,33 +145,31 @@ with st.sidebar.form("registro_form"):
     texto_usuario = st.text_area("O que você estudou?", placeholder="Ex: funções sintáticas e thevenin")
     
     valor_padrao_horas = float(st.session_state.horas_cronometradas) if st.session_state.horas_cronometradas > 0 else 1.0
-    horas_totais = st.number_input("Horas Totais (puxadas do cronômetro ou manuais)", min_value=0.01, step=0.1, format="%.2f", value=valor_padrao_horas)
+    horas_totais = st.number_input("Horas Totais", min_value=0.01, step=0.1, format="%.2f", value=valor_padrao_horas)
     
     submit = st.form_submit_button("Salvar Registros")
 
     if submit and texto_usuario:
-        if not GEMINI_API_KEY:
-            st.error("Chave da API não encontrada! Verifique o arquivo .env")
-        else:
-            with st.spinner("🤖 A IA está classificando suas metas..."):
-                registros_ia = classificar_com_ia(texto_usuario, horas_totais, GEMINI_API_KEY)
-                
+        with st.spinner("🤖 A IA está classificando e enviando para o Sheets..."):
+            registros_ia = classificar_com_ia(texto_usuario, horas_totais, GEMINI_API_KEY)
+            
             novas_linhas = []
             for reg in registros_ia:
                 novas_linhas.append({
-                    "Data": pd.to_datetime(data_estudo), 
+                    "Data": data_estudo.strftime("%Y-%m-%d"), 
                     "Meta": reg.get("Meta", "Sem Meta"),
                     "Categoria": reg.get("Categoria", "Sem Categoria"), 
                     "Assunto": reg.get("Assunto", "Sem Assunto"), 
                     "Horas": float(reg.get("Horas", 0))
                 })
-                
-            df = pd.concat([df, pd.DataFrame(novas_linhas)], ignore_index=True)
-            df.to_csv(ARQUIVO_DADOS, index=False)
             
-            st.session_state.horas_cronometradas = 0.0
-            st.success(f"Foram salvos {len(novas_linhas)} registro(s) com sucesso!")
-            st.rerun()
+            # Adiciona ao dataframe atual e atualiza a planilha no Google Drive
+            df_atualizado = pd.concat([df, pd.DataFrame(novas_linhas)], ignore_index=True)
+            conn.update(spreadsheet=URL_PLANILHA, worksheet="Página1", data=df_atualizado)
+            
+        st.session_state.horas_cronometradas = 0.0
+        st.success(f"Salvo no Google Sheets com sucesso!")
+        st.rerun()
 
 st.sidebar.divider()
 
@@ -194,21 +179,13 @@ st.sidebar.divider()
 st.sidebar.header("⚙️ Gerenciar Dados")
 if st.sidebar.button("🗑️ Apagar Último Registro", use_container_width=True):
     if not df.empty:
-        # Pega a quantidade de linhas antes de apagar
-        tamanho_anterior = len(df)
-        
-        # Remove a última linha
-        df = df.drop(df.tail(1).index)
-        
-        # Salva o arquivo CSV atualizado
-        df.to_csv(ARQUIVO_DADOS, index=False)
-        
-        # Confirma na tela
-        st.sidebar.success("Último registro desfeito!")
+        df_atualizado = df.drop(df.tail(1).index)
+        # Atualiza a planilha removendo a última linha
+        conn.update(spreadsheet=URL_PLANILHA, worksheet="Página1", data=df_atualizado)
+        st.sidebar.success("Último registro removido da nuvem!")
         st.rerun()
     else:
-        st.sidebar.warning("O histórico já está vazio.")
-
+        st.sidebar.warning("A planilha já está vazia.")
 
 # ==========================================
 # PROCESSAMENTO: 20 SEMANAS E ALTAIR HEATMAP
@@ -247,12 +224,12 @@ if not df.empty:
         
         dias_ordem = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
         semanas_ordem = df_grid['Semana_Inicio'].dt.strftime('%d/%m').unique().tolist()
-        max_horas = df_chart['Horas'].max()
+        max_horas = df_chart['Horas'].max() if df_chart['Horas'].max() > 0 else 1.0
 
         chart = alt.Chart(df_chart).mark_rect(cornerRadius=5).encode(
             x=alt.X('Semana_Rotulo:O', title=None, sort=semanas_ordem, axis=alt.Axis(orient='top', labelAngle=-45, tickSize=0, domain=False)),
             y=alt.Y('Dia_Nome:O', title=None, sort=dias_ordem, axis=alt.Axis(tickSize=0, domain=False)),
-            color=alt.Color('Horas:Q', scale=alt.Scale(domain=[0, 0.01, max(0.1, max_horas)], range=['#ebedf0', '#9be9a8', '#216e39']), legend=None),
+            color=alt.Color('Horas:Q', scale=alt.Scale(domain=[0, 0.01, max_horas], range=['#ebedf0', '#9be9a8', '#216e39']), legend=None),
             tooltip=[alt.Tooltip('Semana_Rotulo:O', title='Semana inic.'), alt.Tooltip('Dia_Nome:O', title='Dia'), alt.Tooltip('Horas:Q', title='Horas')]
         ).properties(height=280).configure_scale(bandPaddingInner=0.2).configure_view(strokeWidth=0).configure_axis(grid=False)
 
