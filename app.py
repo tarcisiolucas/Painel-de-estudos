@@ -11,7 +11,213 @@ from streamlit_gsheets import GSheetsConnection
 
 # Configuração da página
 st.set_page_config(page_title="Heatmap de Estudos", layout="wide")
-st.title("📚 Meu Painel de Estudos com IA (Petrobras - Ênfase 12)")
+st.title("📚 Meu Painel de Estudos com IA (TRANSPETRO - Ênfase 17: Automação)")
+
+# ==========================================
+# DATA DA PROVA / CONTAGEM REGRESSIVA
+# ==========================================
+DATA_PROVA = datetime(2026, 11, 30)
+
+# ==========================================
+# CRONOGRAMA OFICIAL (13 semanas, realinhado com o edital da Ênfase 17)
+# Cada tarefa tem um ID único usado como chave do checkbox e como
+# identificador de linha na aba "Checklist" do Google Sheets.
+# ==========================================
+CRONOGRAMA = [
+    {
+        "semana": 1, "periodo": "01/09 a 07/09",
+        "foco": "🔴 Circuitos Elétricos e Medidas — Parte 1",
+        "tarefas": [
+            ("S1-E1", "ELET", "Teoria dos Circuitos Elétricos: Leis de Ohm e Kirchhoff"),
+            ("S1-E2", "ELET", "Resistores em Série e Paralelo, Análise Nodal"),
+            ("S1-E3", "ELET", "Transformação de Fontes, Teorema de Thévenin e Norton"),
+            ("S1-E4", "ELET", "Teorema da Superposição e Teoremas Adicionais"),
+            ("S1-P1", "PORT", "Fonologia (Fonética, Fonemas, Dígrafos, Encontros Vocálicos/Consonantais, Tonicidade)"),
+            ("S1-P2", "PORT", "Acentuação Gráfica"),
+            ("S1-I1", "ING", "Alphabet / vocabulário básico"),
+            ("S1-I2", "ING", "Articles and Nouns"),
+            ("S1-S1", "SIM", "Simulado Diagnóstico (foco em Português e Inglês)"),
+            ("S1-S2", "SIM", "Simulado temático da semana (plataforma própria)"),
+        ],
+    },
+    {
+        "semana": 2, "periodo": "08/09 a 14/09",
+        "foco": "🔴 Circuitos Elétricos e Medidas — Parte 2",
+        "tarefas": [
+            ("S2-E1", "ELET", "Circuitos em Corrente Alternada (fasores, potência ativa/reativa/aparente)"),
+            ("S2-E2", "ELET", "Circuitos Trifásicos"),
+            ("S2-E3", "ELET", "Elementos Armazenadores de Energia, Circuitos de 1ª e 2ª Ordem"),
+            ("S2-E4", "ELET", "Filtros e Quadripolos"),
+            ("S2-P1", "PORT", "Ortografia e Significação das Palavras (Parônimos, Homônimos)"),
+            ("S2-P2", "PORT", "Uso do Hífen"),
+            ("S2-I1", "ING", "Nouns — Syntactic Function / Genitive Case"),
+            ("S2-I2", "ING", "Personal Pronouns"),
+            ("S2-S1", "SIM", "Simulado temático da semana"),
+        ],
+    },
+    {
+        "semana": 3, "periodo": "15/09 a 21/09",
+        "foco": "🔴 Eletrônica Analógica e Digital — Parte 1",
+        "tarefas": [
+            ("S3-E1", "ELET", "Fundamentos de Circuitos Digitais, Sistema de Numeração (BCD, Gray)"),
+            ("S3-E2", "ELET", "Circuitos Lógicos Combinacionais, Teoremas Booleanos e Portas Lógicas"),
+            ("S3-E3", "ELET", "Amplificadores Operacionais (base de eletrônica analógica)"),
+            ("S3-P1", "PORT", "Estrutura e Processo de Formação das Palavras"),
+            ("S3-P2", "PORT", "Morfologia — Substantivos e Adjetivos"),
+            ("S3-I1", "ING", "Reflexive, Demonstrative and Possessive Pronouns"),
+            ("S3-I2", "ING", "Indefinite, Relative and Interrogative Pronouns"),
+            ("S3-S1", "SIM", "Simulado temático da semana"),
+        ],
+    },
+    {
+        "semana": 4, "periodo": "22/09 a 28/09",
+        "foco": "🔴 Eletrônica Analógica e Digital — Parte 2",
+        "tarefas": [
+            ("S4-E1", "ELET", "Flip-Flops, Contadores Assíncronos e Síncronos, Registradores"),
+            ("S4-E2", "ELET", "Conversores A-D e D-A"),
+            ("S4-E3", "ELET", "Bateria de questões — Eletrônica Digital completo"),
+            ("S4-P1", "PORT", "Morfologia — Numerais, Artigos e Interjeições"),
+            ("S4-P2", "PORT", "Morfologia — Conjunções e Preposições"),
+            ("S4-I1", "ING", "Determiners and Numerals"),
+            ("S4-I2", "ING", "Adjectives (Cardinal/Ordinal, Comparative/Superlative)"),
+            ("S4-S1", "SIM", "Simulado temático da semana"),
+        ],
+    },
+    {
+        "semana": 5, "periodo": "29/09 a 05/10",
+        "foco": "🔴 Sistemas de Controle Linear/Não-linear/Digital + Conceitos de Estabilidade",
+        "tarefas": [
+            ("S5-E1", "ELET", "Problema Geral de Controle, Realimentação, Servossistemas Lineares"),
+            ("S5-E2", "ELET", "Função de Transferência, Diagramas de Blocos, Equação de Estado"),
+            ("S5-E3", "ELET", "Estabilidade: Lugar das Raízes, Resposta em Frequência (Bode)"),
+            ("S5-P1", "PORT", "Morfologia — Pronomes"),
+            ("S5-P2", "PORT", "Morfologia — Advérbios"),
+            ("S5-I1", "ING", "Adverbs and Verbal Phrases (Comparative/Superlative)"),
+            ("S5-I2", "ING", "Prepositions"),
+            ("S5-S1", "SIM", "Simulado temático da semana"),
+        ],
+    },
+    {
+        "semana": 6, "periodo": "06/10 a 12/10",
+        "foco": "🟢 Controle e Servomecanismos + Controle Discreto (itens oficiais sem histórico)",
+        "tarefas": [
+            ("S6-E1", "ELET", "Fundamentos de Controle Discreto (amostragem, Transformada Z)"),
+            ("S6-E2", "ELET", "Equações a Diferenças, Sistemas em Tempo Discreto"),
+            ("S6-E3", "ELET", "Servomecanismos: conceitos e aplicações práticas"),
+            ("S6-P1", "PORT", "Morfologia — Verbo (classificação, tempos, vozes)"),
+            ("S6-P2", "PORT", "Função do \"Que\" e do \"Se\""),
+            ("S6-I1", "ING", "Conjunctions"),
+            ("S6-I2", "ING", "Subordinate Clauses"),
+            ("S6-R1", "REV", "Revisão geral — Semanas 1 a 6"),
+            ("S6-S1", "SIM", "SIMULADO 1 COMPLETO (prova inteira, tempo cronometrado) + correção"),
+        ],
+    },
+    {
+        "semana": 7, "periodo": "13/10 a 19/10",
+        "foco": "🔴 Sistemas de Atuação Hidráulicos e Pneumáticos (item que estava zerado)",
+        "tarefas": [
+            ("S7-E1", "ELET", "Fundamentos de hidráulica e pneumática aplicadas à automação"),
+            ("S7-E2", "ELET", "Válvulas de controle e de bloqueio, atuadores hidráulicos e pneumáticos"),
+            ("S7-E3", "ELET", "Acumuladores, relação pressão x vazão, aplicação em dutos e terminais"),
+            ("S7-P1", "PORT", "Sintaxe do Período Simples — Termos Essenciais (Sujeito, Predicado)"),
+            ("S7-P2", "PORT", "Termos Integrantes e Acessórios da Oração"),
+            ("S7-I1", "ING", "Simple Present"),
+            ("S7-I2", "ING", "Present Continuous / Simple Past"),
+            ("S7-R1", "REV", "Correção dos erros do Simulado 1"),
+            ("S7-S1", "SIM", "Simulado temático da semana"),
+        ],
+    },
+    {
+        "semana": 8, "periodo": "20/10 a 26/10",
+        "foco": "🔴 Redes de Computadores e Comunicação de Dados",
+        "tarefas": [
+            ("S8-E1", "ELET", "Modelo de Camadas ISO/OSI, Arquitetura TCP/IP"),
+            ("S8-E2", "ELET", "Protocolos e Topologias de Rede, Redes de \"Chão de Fábrica\" (Fieldbus, Profibus)"),
+            ("S8-E3", "ELET", "Conceito de Comunicação Digital, Segurança de Redes — noções básicas"),
+            ("S8-P1", "PORT", "Sintaxe do Período Composto — Coordenação e Subordinadas Adverbiais"),
+            ("S8-P2", "PORT", "Subordinadas Substantivas, Adjetivas e Reduzidas"),
+            ("S8-I1", "ING", "Past Continuous / Present Perfect"),
+            ("S8-I2", "ING", "Present Perfect Continuous / Past Perfect"),
+            ("S8-S1", "SIM", "Simulado temático da semana"),
+        ],
+    },
+    {
+        "semana": 9, "periodo": "27/10 a 02/11",
+        "foco": "🟡 Ferramentas Matemáticas Aplicadas + Modelagem e Simulação de Sistemas Dinâmicos",
+        "tarefas": [
+            ("S9-E1", "ELET", "Transformadas de Laplace e Z, Métodos Numéricos"),
+            ("S9-E2", "ELET", "Linearização de sistemas não-lineares, Espaço de Estados"),
+            ("S9-E3", "ELET", "Dinâmica de Sistemas: massa-mola-amortecedor (base física para modelagem)"),
+            ("S9-P1", "PORT", "Regência Verbal e Nominal"),
+            ("S9-P2", "PORT", "Concordância Verbal e Nominal"),
+            ("S9-I1", "ING", "Past Perfect Continuous / Passive Voice"),
+            ("S9-I2", "ING", "Modal Verbs / Infinitive, Gerund and Participle"),
+            ("S9-S1", "SIM", "SIMULADO 2 COMPLETO (prova inteira, tempo cronometrado) + correção"),
+        ],
+    },
+    {
+        "semana": 10, "periodo": "03/11 a 09/11",
+        "foco": "🟡 Eletrônica de Potência + Conversão Eletromecânica de Energia",
+        "tarefas": [
+            ("S10-E1", "ELET", "Conceitos Básicos, Retificadores, Tiristor"),
+            ("S10-E2", "ELET", "Chopper, Controlador CA, Inversor de Frequência, Conversores CC-CC"),
+            ("S10-E3", "ELET", "Princípios de Conversão Eletromecânica: transformadores e máquinas"),
+            ("S10-P1", "PORT", "Crase"),
+            ("S10-P2", "PORT", "Colocação Pronominal e Pontuação"),
+            ("S10-I1", "ING", "Phrasal Verbs and Prepositional Verbs / Reported Speech"),
+            ("S10-I2", "ING", "Simple Future / Progressive Future / Future Perfect"),
+            ("S10-R1", "REV", "Correção dos erros do Simulado 2"),
+            ("S10-S1", "SIM", "Simulado temático da semana"),
+        ],
+    },
+    {
+        "semana": 11, "periodo": "10/11 a 16/11",
+        "foco": "🟡 Sensores e Transdutores + Processamento de Sinais + CLP/PLC e Programação",
+        "tarefas": [
+            ("S11-E1", "ELET", "Instrumentação e Técnicas de Medida, Sensores de pressão/nível/temperatura/vazão"),
+            ("S11-E2", "ELET", "Curvas de calibração e resposta em frequência (Bode), Filtragem de sinais"),
+            ("S11-E3", "ELET", "Programação Ladder, IL-SFC, ST; Microprocessadores/Microcontroladores; Sistemas Embarcados"),
+            ("S11-P1", "PORT", "Uso dos Porquês e Variação Linguística"),
+            ("S11-P2", "PORT", "Gênero e Tipologia Textual / Tipos de Discurso"),
+            ("S11-I1", "ING", "Conditional Clauses (If Clauses)"),
+            ("S11-I2", "ING", "Subjunctive Mood and Wish"),
+            ("S11-S1", "SIM", "SIMULADO 3 COMPLETO (prova inteira, tempo cronometrado) + correção"),
+        ],
+    },
+    {
+        "semana": 12, "periodo": "17/11 a 23/11",
+        "foco": "🟢 Robótica + Automação da Manufatura/Industrial + Revisão de Português/Inglês",
+        "tarefas": [
+            ("S12-E1", "ELET", "Fundamentos de Robótica: cinemática básica, tipos de manipuladores"),
+            ("S12-E2", "ELET", "Integração e Automação da Manufatura, Automação Industrial (segurança ICS)"),
+            ("S12-E3", "ELET", "Revisão de Dinâmica de Sistemas e Estabilidade (reforço)"),
+            ("S12-P1", "PORT", "Funções da Linguagem e Figuras de Linguagem"),
+            ("S12-P2", "PORT", "Polissemia, Ambiguidade, Coesão e Coerência"),
+            ("S12-I1", "ING", "Tag Questions"),
+            ("S12-I2", "ING", "Reading Techniques (técnicas de leitura e interpretação)"),
+            ("S12-P3", "PORT", "Interpretação de Texto — prática intensiva com textos de prova (PORT e ING)"),
+            ("S12-S1", "SIM", "SIMULADO 4 COMPLETO (prova inteira, tempo cronometrado) + correção"),
+            ("S12-R1", "REV", "Revisão geral de todo o Português e Inglês (focar no que errou nos simulados)"),
+        ],
+    },
+    {
+        "semana": 13, "periodo": "24/11 a 30/11 — RETA FINAL",
+        "foco": "🔵 Revisão final e prova",
+        "tarefas": [
+            ("S13-1", "REV", "24-25/11: Revisão ativa dos 5 Temas de Alta Frequência de ELET"),
+            ("S13-2", "REV", "26/11: Revisão ativa de Português e Inglês (foco nos erros dos 4 simulados)"),
+            ("S13-3", "SIM", "27/11: Refazer prova anterior completa (2023), tempo oficial"),
+            ("S13-4", "REV", "28/11: Revisão dos pontos fracos da prova de 2023"),
+            ("S13-5", "REV", "29/11: Revisão leve de resumos/fórmulas + logística da prova"),
+            ("S13-6", "FINAL", "30/11: DIA DA PROVA"),
+        ],
+    },
+]
+
+CORES_CATEGORIA = {
+    "ELET": "#1f77b4", "PORT": "#d62728", "ING": "#2ca02c",
+    "SIM": "#9467bd", "REV": "#7f7f7f", "FINAL": "#e69138",
+}
 
 # ==========================================
 # VARIÁVEIS DE SESSÃO E CONEXÕES
@@ -27,6 +233,7 @@ URL_PLANILHA = st.secrets["spreadsheet"]
 # Conexão com o Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+
 def carregar_dados():
     try:
         # ttl=0 obriga a ler a planilha em tempo real sempre
@@ -38,67 +245,152 @@ def carregar_dados():
         st.error(f"Erro ao ler a planilha: {e}")
         return pd.DataFrame(columns=["Data", "Meta", "Categoria", "Assunto", "Horas"])
 
+
 df = carregar_dados()
 
+
+# ==========================================
+# CHECKLIST DO CRONOGRAMA (nova aba "Checklist" no Google Sheets)
+# ==========================================
+def gerar_checklist_inicial():
+    """Constrói o DataFrame base a partir do CRONOGRAMA, todas as tarefas desmarcadas."""
+    linhas = []
+    for semana_info in CRONOGRAMA:
+        for tarefa_id, categoria, texto in semana_info["tarefas"]:
+            linhas.append({
+                "ID": tarefa_id,
+                "Semana": semana_info["semana"],
+                "Periodo": semana_info["periodo"],
+                "Categoria": categoria,
+                "Tarefa": texto,
+                "Concluido": False,
+                "DataConclusao": "",
+            })
+    return pd.DataFrame(linhas)
+
+
+def carregar_checklist():
+    """Lê a aba 'Checklist'. Se não existir ou estiver vazia/desatualizada, cria com base no CRONOGRAMA."""
+    try:
+        df_check = conn.read(spreadsheet=URL_PLANILHA, worksheet="Checklist", ttl=0)
+        if df_check.empty or "ID" not in df_check.columns:
+            raise ValueError("Aba Checklist vazia ou sem a coluna ID")
+        df_check["Concluido"] = df_check["Concluido"].astype(str).str.lower().isin(["true", "1", "sim", "verdadeiro"])
+        # Garante que novas tarefas adicionadas ao CRONOGRAMA (ex: você editou o script) entrem na planilha
+        ids_existentes = set(df_check["ID"])
+        ids_atuais = {t[0] for s in CRONOGRAMA for t in s["tarefas"]}
+        ids_faltando = ids_atuais - ids_existentes
+        if ids_faltando:
+            df_novo = gerar_checklist_inicial()
+            df_novo = df_novo[df_novo["ID"].isin(ids_faltando)]
+            df_check = pd.concat([df_check, df_novo], ignore_index=True)
+            conn.update(spreadsheet=URL_PLANILHA, worksheet="Checklist", data=df_check)
+        return df_check
+    except Exception:
+        df_inicial = gerar_checklist_inicial()
+        try:
+            conn.update(spreadsheet=URL_PLANILHA, worksheet="Checklist", data=df_inicial)
+        except Exception as e:
+            st.warning(
+                f"Não consegui criar a aba 'Checklist' automaticamente ({e}). "
+                "Crie manualmente uma aba chamada 'Checklist' na planilha e recarregue a página."
+            )
+        return df_inicial
+
+
+if "checklist_df" not in st.session_state:
+    st.session_state.checklist_df = carregar_checklist()
+    st.session_state.checklist_salvo = True
+
+
+def marcar_tarefa(tarefa_id):
+    novo_valor = st.session_state[f"chk_{tarefa_id}"]
+    df_chk = st.session_state.checklist_df
+    df_chk.loc[df_chk["ID"] == tarefa_id, "Concluido"] = novo_valor
+    df_chk.loc[df_chk["ID"] == tarefa_id, "DataConclusao"] = (
+        datetime.now().strftime("%Y-%m-%d") if novo_valor else ""
+    )
+    st.session_state.checklist_salvo = False
+
+
+def salvar_checklist():
+    conn.update(spreadsheet=URL_PLANILHA, worksheet="Checklist", data=st.session_state.checklist_df)
+    st.session_state.checklist_salvo = True
+
+
+# ==========================================
+# CLASSIFICAÇÃO COM IA
+# ==========================================
 def classificar_com_ia(texto_estudo, horas_padrao, api_key):
     if not api_key:
         return [{"Meta": "Sem Meta", "Categoria": "Geral (Sem IA)", "Assunto": texto_estudo, "Horas": horas_padrao}]
-    
+
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-3.5-flash')
-        
+
         prompt = f"""
-        Você é um classificador rigoroso de dados para o cronograma de 60 Metas do concurso da Petrobras (Ênfase 12: Eletrônica).
-        Sua missão é ler o que o usuário estudou, separar os assuntos e classificá-los EXATAMENTE de acordo com o mapeamento oficial abaixo.
+        Você é um classificador rigoroso de dados para o cronograma de estudos da TRANSPETRO
+        (Ênfase 17: Engenharia de Automação), organizado em 13 semanas (01/09 a 30/11/2026).
+        Sua missão é ler o que o usuário estudou, separar os assuntos e classificá-los EXATAMENTE
+        de acordo com o mapeamento oficial abaixo.
 
         Entrada do usuário: "{texto_estudo}"
 
         === CRONOGRAMA OFICIAL (USE ESTAS REFERÊNCIAS PARA A "Meta" E A "Categoria") ===
-        [PORTUGUÊS - Categoria: PORT]
-        Metas 01 a 03: Fonologia, Acentuação Gráfica, Ortografia, Significação das Palavras, Hífen.
-        Metas 04 a 18: Estrutura e Formação das Palavras, Morfologia (Substantivos, Artigos, Conjunções, Preposição, Numerais, Interjeição, Adjetivos, Pronomes, Verbos, Advérbios).
-        Metas 19 a 24: Funções Sintáticas (Que, Se), Sintaxe Período Simples (Orações).
-        Metas 25 a 30: Sintaxe Período Composto (Coordenação, Subordinadas, Adjetivas, Adverbiais).
-        Metas 31 a 34: Regência Verbal e Nominal, Orações Reduzidas.
-        Metas 37 a 42: Concordância Verbal e Nominal, Crase, Colocação Pronominal.
-        Metas 43 a 45: Pontuação, Uso dos Porquês, Vozes Verbais.
-        Metas 46 a 51: Variação Linguística, Gênero e Tipologia Textual, Tipos de Discurso.
-        Metas 52 a 57: Funções e Figuras de Linguagem, Polissemia, Ambiguidade, Coesão e Coerência.
-        Metas 58 a 60: Interpretação de Texto, Compreensão Textual.
+        A "Meta" deve ser preenchida no formato "Semana X" (X de 1 a 13).
+        A "Categoria" deve ser uma destas: ELET, PORT, ING, SIM ou REV.
 
-        [INGLÊS - Categoria: ING]
-        Metas 01 a 03: Alfabeto (Alphabet).
-        Metas 04 a 18: Substantivos (Nouns), Caso Genitivo, Pronomes (Pronouns).
-        Metas 16 a 27: Determinantes, Numerais, Adjetivos (Adjectives), Advérbios (Adverbs), Preposições.
-        Metas 28 a 30: Conjunções (Conjunctions).
-        Metas 34 a 51: Verbos e Tempos Verbais (Present, Past, Perfect, Continuous, Modal, Phrasal, Future, Reported Speech).
-        Metas 52 a 60: Orações Condicionais (If Clauses), Tag Questions, Técnicas de Leitura (Reading).
+        [ELET - por semana]
+        Semana 1-2: Circuitos Elétricos (Ohm, Kirchhoff, Thevenin, Norton, Superposição, CA/CC, Trifásicos, Filtros, Quadripolos).
+        Semana 3-4: Eletrônica Analógica e Digital (portas lógicas, combinacionais, Flip-Flops, contadores, conversores A/D-D/A, amp op).
+        Semana 5: Controle Linear/Não-linear/Digital, Estabilidade (Bode, Lugar das Raízes), Espaço de Estados.
+        Semana 6: Controle Discreto e Servomecanismos (Transformada Z, amostragem).
+        Semana 7: Sistemas de Atuação Hidráulicos e Pneumáticos (válvulas, atuadores, acumuladores).
+        Semana 8: Redes de Computadores (OSI, TCP/IP, protocolos, chão de fábrica, segurança de redes).
+        Semana 9: Ferramentas Matemáticas (Laplace, Z), Modelagem e Simulação de Sistemas Dinâmicos.
+        Semana 10: Eletrônica de Potência (retificadores, tiristor, chopper, inversor) e Conversão Eletromecânica.
+        Semana 11: Sensores e Transdutores, Processamento de Sinais, CLP/PLC (Ladder, IL-SFC, ST), Microcontroladores, Sistemas Embarcados.
+        Semana 12: Robótica, Integração e Automação da Manufatura, Automação Industrial.
+        Semana 13: Revisão geral e prova anterior.
 
-        [ELETRÔNICA - Categoria: ELET]
-        Metas 01 a 03: Circuitos Elétricos (Thevenin, Norton, Superposição, CA, CC, Leis de Kirchhoff).
-        Metas 04 a 08: Eletrônica Analógica (Diodos, Transistores BJT, FET, Amplificador Operacional).
-        Metas 08 a 12: Eletrônica Digital (Portas lógicas, Combinacionais, Flip-Flops, Contadores, Conversores A/D e D/A, Memórias).
-        Metas 12 a 15: Sinais e Sistemas, Eletrônica de Potência (Tiristor, Inversores, Retificadores, Chopper).
-        Metas 16 a 18: Máquinas Elétricas, Transformadores, Conversão de Energia.
-        Metas 18 a 24: Controle (PID, Servossistemas, Estabilidade, Lugar das Raízes), Instrumentação Industrial, Automação PLC.
-        Metas 25 a 27: Programação de Computadores (Algoritmos, POO, Estrutura de Dados), Arquitetura de Computadores.
-        Metas 27 a 30: Sistemas Operacionais (Processos, Memória, IO, Sistemas Distribuídos, Tempo Real).
-        Metas 30 a 33: Redes de Computadores (OSI, TCP/IP, Segurança, Transmissão, IoT).
-        Metas 33 a 36: Medidas Elétricas, Termodinâmica (Primeira/Segunda Lei, Gases Perfeitos, Ciclos Rankine, Carnot, Refrigeração).
-        Metas 37 a 42: Mecânica dos Fluidos (Trocadores de calor, Densidade, Pressão, Pascal, Empuxo, Bernoulli, Venturi, Torricelli).
-        Metas 43 a 48: Eletromagnetismo (Gauss, Coulomb, Campos, Micro-ondas, Linhas de Transmissão).
-        Metas 49 a 54: Princípios de Telecomunicações (Modulação), Antenas, Robótica, Optoeletrônica (LED, Laser).
-        Metas 54 a 60: Sistemas de Banco de Dados (Relacional, SQL), Compiladores (Autômatos, Análise Léxica/Sintática).
+        [PORT - por semana]
+        Semana 1: Fonologia, Acentuação Gráfica.
+        Semana 2: Ortografia, Significação das Palavras, Hífen.
+        Semana 3: Estrutura/Formação de Palavras, Morfologia (Substantivos, Adjetivos).
+        Semana 4: Morfologia (Numerais, Artigos, Interjeições, Conjunções, Preposições).
+        Semana 5: Morfologia (Pronomes, Advérbios).
+        Semana 6: Morfologia (Verbo), Função do Que/Se.
+        Semana 7: Sintaxe do Período Simples (Termos Essenciais, Integrantes, Acessórios).
+        Semana 8: Sintaxe do Período Composto (Coordenação, Subordinadas).
+        Semana 9: Regência Verbal e Nominal, Concordância Verbal e Nominal.
+        Semana 10: Crase, Colocação Pronominal, Pontuação.
+        Semana 11: Uso dos Porquês, Variação Linguística, Gênero e Tipologia Textual.
+        Semana 12: Funções e Figuras de Linguagem, Polissemia, Ambiguidade, Coesão, Coerência, Interpretação de Texto.
+
+        [ING - por semana]
+        Semana 1: Alphabet, Articles, Nouns.
+        Semana 2: Nouns (Syntactic Function, Genitive Case), Personal Pronouns.
+        Semana 3: Reflexive/Demonstrative/Possessive/Indefinite/Relative/Interrogative Pronouns.
+        Semana 4: Determiners, Numerals, Adjectives (Comparative/Superlative).
+        Semana 5: Adverbs, Prepositions.
+        Semana 6: Conjunctions, Subordinate Clauses.
+        Semana 7: Simple Present, Present Continuous, Simple Past.
+        Semana 8: Present Perfect, Present Perfect Continuous, Past Perfect.
+        Semana 9: Past Perfect Continuous, Passive Voice, Modal Verbs, Infinitive/Gerund/Participle.
+        Semana 10: Phrasal Verbs, Reported Speech, Simple Future, Future Perfect.
+        Semana 11: Conditional Clauses, Subjunctive Mood.
+        Semana 12: Tag Questions, Reading Techniques.
 
         INSTRUÇÕES DE EXECUÇÃO:
         1. Identifique cada assunto estudado na "Entrada do usuário".
-        2. Para cada assunto, cruze com o "CRONOGRAMA OFICIAL" para encontrar a Categoria (PORT, ING ou ELET) e estime a Meta.
-        3. Identifique as horas gastas. Se não estiverem no texto, divida {horas_padrao} horas proporcionalmente.
-        
-        SAÍDA OBRIGATÓRIA (JSON ESTrito):
+        2. Para cada assunto, cruze com o "CRONOGRAMA OFICIAL" para encontrar a Semana (Meta) e a Categoria (ELET, PORT ou ING).
+        3. Se o usuário mencionar simulado, prova ou revisão, use Categoria "SIM" ou "REV" conforme o caso.
+        4. Identifique as horas gastas. Se não estiverem no texto, divida {horas_padrao} horas proporcionalmente.
+
+        SAÍDA OBRIGATÓRIA (JSON ESTRITO):
         [
-          {{"Meta": "Meta 13", "Categoria": "ELET", "Assunto": "Eletrônica de Potência - Retificadores", "Horas": 2.0}}
+          {{"Meta": "Semana 7", "Categoria": "ELET", "Assunto": "Sistemas de Atuação Hidráulicos e Pneumáticos - Válvulas", "Horas": 2.0}}
         ]
         """
         resposta = model.generate_content(prompt).text.strip()
@@ -110,6 +402,32 @@ def classificar_com_ia(texto_estudo, horas_padrao, api_key):
     except Exception as e:
         print(f"\n===== ERRO DA IA =====\n{e}\n======================\n")
         return [{"Meta": "Erro de IA", "Categoria": "Geral", "Assunto": texto_estudo, "Horas": horas_padrao}]
+
+
+# ==========================================
+# CONTAGEM REGRESSIVA (topo do painel)
+# ==========================================
+hoje = datetime.now()
+dias_restantes = (DATA_PROVA - hoje).days
+semanas_restantes = dias_restantes / 7
+
+col_cd1, col_cd2, col_cd3 = st.columns(3)
+with col_cd1:
+    if dias_restantes >= 0:
+        st.metric("⏳ Dias até a prova", f"{dias_restantes} dias")
+    else:
+        st.metric("⏳ Status", "Prova já realizada")
+with col_cd2:
+    st.metric("📆 Semanas restantes", f"{semanas_restantes:.1f} semanas")
+with col_cd3:
+    total_tarefas = len(st.session_state.checklist_df)
+    concluidas = int(st.session_state.checklist_df["Concluido"].sum())
+    pct = concluidas / total_tarefas if total_tarefas else 0
+    st.metric("✅ Progresso do cronograma", f"{concluidas}/{total_tarefas} ({pct:.0%})")
+
+st.progress(pct)
+st.caption(f"Prova: 30/11/2026 · Ênfase 17 - Engenharia de Automação (TRANSPETRO)")
+st.divider()
 
 # ==========================================
 # BARRA LATERAL: CRONÔMETRO
@@ -143,30 +461,30 @@ st.sidebar.header("Registrar Estudo")
 with st.sidebar.form("registro_form"):
     data_estudo = st.date_input("Data", datetime.today())
     texto_usuario = st.text_area("O que você estudou?", placeholder="Ex: funções sintáticas e thevenin")
-    
+
     valor_padrao_horas = float(st.session_state.horas_cronometradas) if st.session_state.horas_cronometradas > 0 else 1.0
     horas_totais = st.number_input("Horas Totais", min_value=0.01, step=0.1, format="%.2f", value=valor_padrao_horas)
-    
+
     submit = st.form_submit_button("Salvar Registros")
 
     if submit and texto_usuario:
         with st.spinner("🤖 A IA está classificando e enviando para o Sheets..."):
             registros_ia = classificar_com_ia(texto_usuario, horas_totais, GEMINI_API_KEY)
-            
+
             novas_linhas = []
             for reg in registros_ia:
                 novas_linhas.append({
-                    "Data": data_estudo.strftime("%Y-%m-%d"), 
+                    "Data": data_estudo.strftime("%Y-%m-%d"),
                     "Meta": reg.get("Meta", "Sem Meta"),
-                    "Categoria": reg.get("Categoria", "Sem Categoria"), 
-                    "Assunto": reg.get("Assunto", "Sem Assunto"), 
+                    "Categoria": reg.get("Categoria", "Sem Categoria"),
+                    "Assunto": reg.get("Assunto", "Sem Assunto"),
                     "Horas": float(reg.get("Horas", 0))
                 })
-            
+
             # Adiciona ao dataframe atual e atualiza a planilha no Google Drive
             df_atualizado = pd.concat([df, pd.DataFrame(novas_linhas)], ignore_index=True)
             conn.update(spreadsheet=URL_PLANILHA, worksheet="Página1", data=df_atualizado)
-            
+
         st.session_state.horas_cronometradas = 0.0
         st.success(f"Salvo no Google Sheets com sucesso!")
         st.rerun()
@@ -187,41 +505,60 @@ if st.sidebar.button("🗑️ Apagar Último Registro", use_container_width=True
     else:
         st.sidebar.warning("A planilha já está vazia.")
 
+if st.sidebar.button("🔄 Recarregar Checklist do Sheets", use_container_width=True):
+    st.session_state.checklist_df = carregar_checklist()
+    st.session_state.checklist_salvo = True
+    st.sidebar.success("Checklist recarregado!")
+    st.rerun()
+
 # ==========================================
-# PROCESSAMENTO: 20 SEMANAS E ALTAIR HEATMAP
+# PROCESSAMENTO: DADOS, MÉTRICAS E GRÁFICOS
 # ==========================================
 if not df.empty:
+    # Garantir que a coluna Data é datetime e Horas é numérico
     df['Data'] = pd.to_datetime(df['Data'], format='mixed')
+    df['Horas'] = pd.to_numeric(df['Horas'], errors='coerce').fillna(0)
+
+    # ------------------------------------------
+    # 1. QUADRO DE HORAS TOTAIS
+    # ------------------------------------------
+    horas_totais = df['Horas'].sum()
+    st.metric(label="⏳ Total de Horas Estudadas", value=f"{horas_totais:.2f}h")
+    st.divider()
+
+    # ------------------------------------------
+    # 2. MAPA DE CALOR (20 SEMANAS)
+    # ------------------------------------------
     data_inicio = df['Data'].min()
     data_fim = data_inicio + timedelta(weeks=20)
     df_20 = df[(df['Data'] >= data_inicio) & (df['Data'] < data_fim)].copy()
 
     if not df_20.empty:
         st.subheader(f"🔥 Mapa de Calor (20 Semanas a partir de {data_inicio.strftime('%d/%m/%Y')})")
-        
+
         df_20['Semana_Inicio'] = df_20['Data'] - pd.to_timedelta(df_20['Data'].dt.weekday, unit='D')
         df_20['Semana_Inicio'] = df_20['Semana_Inicio'].dt.normalize()
-        df_20['Dia_Semana'] = df_20['Data'].dt.weekday 
-        
+        df_20['Dia_Semana'] = df_20['Data'].dt.weekday
+
         heatmap_data = df_20.groupby(['Semana_Inicio', 'Dia_Semana'])['Horas'].sum().reset_index()
-        
+
         start_date = data_inicio - timedelta(days=data_inicio.weekday())
         start_date = pd.to_datetime(start_date).normalize()
-        
+
         grid_semanas, grid_dias = [], []
         for i in range(20):
             dt = start_date + timedelta(weeks=i)
             for d in range(7):
                 grid_semanas.append(dt)
                 grid_dias.append(d)
-                
+
         df_grid = pd.DataFrame({'Semana_Inicio': grid_semanas, 'Dia_Semana': grid_dias})
         df_chart = pd.merge(df_grid, heatmap_data, on=['Semana_Inicio', 'Dia_Semana'], how='left').fillna(0)
-        
+
         dias_map = {0: 'Seg', 1: 'Ter', 2: 'Qua', 3: 'Qui', 4: 'Sex', 5: 'Sáb', 6: 'Dom'}
         df_chart['Dia_Nome'] = df_chart['Dia_Semana'].map(dias_map)
         df_chart['Semana_Rotulo'] = df_chart['Semana_Inicio'].dt.strftime('%d/%m')
-        
+
         dias_ordem = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
         semanas_ordem = df_grid['Semana_Inicio'].dt.strftime('%d/%m').unique().tolist()
         max_horas = df_chart['Horas'].max() if df_chart['Horas'].max() > 0 else 1.0
@@ -236,23 +573,86 @@ if not df.empty:
         st.altair_chart(chart, width='stretch')
         st.divider()
 
-        # ==========================================
-        # GRÁFICO INTERATIVO DE CATEGORIAS
-        # ==========================================
+        # ------------------------------------------
+        # 3. GRÁFICOS INTERATIVOS DE METAS E CATEGORIAS
+        # ------------------------------------------
         st.subheader("🎯 Distribuição por Metas e Matérias")
+
+        # Novo: Gráfico de Barras por Categoria
+        df_categoria = df.groupby("Categoria")["Horas"].sum().reset_index().sort_values(by="Horas", ascending=False)
+        fig_bar = px.bar(
+            df_categoria,
+            x='Categoria',
+            y='Horas',
+            text_auto='.2f',
+            color='Categoria',
+            title="Horas Totais por Categoria",
+            labels={'Horas': 'Horas Estudadas'}
+        )
+        fig_bar.update_traces(textfont_size=12, textangle=0, textposition="outside", cliponaxis=False)
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+        st.divider()
+
+        # Tabela e Sunburst originais
         df_agrupado = df.groupby(["Meta", "Categoria", "Assunto"])["Horas"].sum().reset_index()
-        
+
         col1, col2 = st.columns([1, 1.5])
         with col1:
             st.dataframe(df_agrupado.sort_values(by=["Meta", "Horas"], ascending=[True, False]), width='stretch', hide_index=True)
-            
+
         with col2:
-            fig_sun = px.sunburst(df_agrupado, path=['Meta', 'Categoria', 'Assunto'], values='Horas', color='Categoria')
-            fig_sun.update_traces(textinfo="label+value") 
-            fig_sun.update_layout(margin=dict(t=0, l=0, r=0, b=0))
+            fig_sun = px.sunburst(df_agrupado, path=['Meta', 'Categoria', 'Assunto'], values='Horas', color='Categoria', title="Detalhamento das Metas")
+            fig_sun.update_traces(textinfo="label+value")
+            fig_sun.update_layout(margin=dict(t=30, l=0, r=0, b=0))
             st.plotly_chart(fig_sun, use_container_width=True)
 
     else:
         st.info("Nenhum estudo registrado neste intervalo.")
 else:
-    st.info("Adicione seu primeiro registro de estudo na barra lateral para ver o mapa de calor!")
+    st.info("Adicione seu primeiro registro de estudo na barra lateral para ver o painel!")
+
+st.divider()
+
+# ==========================================
+# 4. CRONOGRAMA DETALHADO — CHECKLIST POR SEMANA
+# ==========================================
+st.header("📅 Cronograma de Estudos — Marque conforme for estudando")
+
+if not st.session_state.checklist_salvo:
+    st.warning("Você tem alterações não salvas neste cronograma.")
+
+if st.button("💾 Salvar Progresso do Cronograma no Google Sheets", type="primary"):
+    with st.spinner("Salvando..."):
+        salvar_checklist()
+    st.success("Progresso salvo na aba 'Checklist' da planilha!")
+
+df_chk = st.session_state.checklist_df
+
+# Determina a semana atual do plano (Semana 1 começa em 01/09/2026) para abrir o expander correspondente
+INICIO_PLANO = datetime(2026, 9, 1)
+if hoje < INICIO_PLANO:
+    semana_atual = 1
+else:
+    semana_atual = min(13, ((hoje - INICIO_PLANO).days // 7) + 1)
+
+for semana_info in CRONOGRAMA:
+    semana_num = semana_info["semana"]
+    df_semana = df_chk[df_chk["Semana"] == semana_num]
+    concluidas_semana = int(df_semana["Concluido"].sum())
+    total_semana = len(df_semana)
+    rotulo_expander = f"Semana {semana_num} ({semana_info['periodo']}) — {concluidas_semana}/{total_semana} concluídas"
+
+    with st.expander(rotulo_expander, expanded=(semana_num == semana_atual)):
+        st.markdown(f"**Foco:** {semana_info['foco']}")
+        for _, row in df_semana.iterrows():
+            tarefa_id = row["ID"]
+            categoria = row["Categoria"]
+            rotulo = f"[{categoria}] {row['Tarefa']}"
+            st.checkbox(
+                rotulo,
+                value=bool(row["Concluido"]),
+                key=f"chk_{tarefa_id}",
+                on_change=marcar_tarefa,
+                args=(tarefa_id,),
+            )
