@@ -5,3 +5,4 @@ altair
 google-generativeai
 python-dotenv
 st-gsheets-connection
+streamlit-autorefresh

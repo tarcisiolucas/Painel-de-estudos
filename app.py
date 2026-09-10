@@ -9,6 +9,22 @@ import google.generativeai as genai
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
+# Prioriza st.fragment (roda só um pedaço da página a cada tick, sem reler a
+# planilha nem redesenhar os gráficos). Cai para streamlit-autorefresh (reroda
+# a página inteira) apenas se a versão do Streamlit for antiga demais.
+if hasattr(st, "fragment"):
+    _FRAGMENT_DECORATOR = st.fragment
+elif hasattr(st, "experimental_fragment"):
+    _FRAGMENT_DECORATOR = st.experimental_fragment
+else:
+    _FRAGMENT_DECORATOR = None
+
+try:
+    from streamlit_autorefresh import st_autorefresh
+    AUTOREFRESH_DISPONIVEL = True
+except ImportError:
+    AUTOREFRESH_DISPONIVEL = False
+
 # Configuração da página
 st.set_page_config(page_title="Heatmap de Estudos", layout="wide")
 st.title("📚 Meu Painel de Estudos com IA (TRANSPETRO - Ênfase 17: Automação)")
@@ -219,6 +235,12 @@ CORES_CATEGORIA = {
     "SIM": "#9467bd", "REV": "#7f7f7f", "FINAL": "#e69138",
 }
 
+
+def extrai_semana_num(meta_str):
+    """Extrai o número da semana de valores como 'Semana 7' ou (formato antigo) 'Meta 13'."""
+    m = re.search(r"(\d+)", str(meta_str))
+    return int(m.group(1)) if m else 0
+
 # ==========================================
 # VARIÁVEIS DE SESSÃO E CONEXÕES
 # ==========================================
@@ -227,6 +249,17 @@ if 'timer_rodando' not in st.session_state:
     st.session_state.inicio_timer = None
     st.session_state.horas_cronometradas = 0.0
 
+# --- Estado do timer Pomodoro ---
+if 'pomodoro_ativo' not in st.session_state:
+    st.session_state.pomodoro_ativo = False
+    st.session_state.pomodoro_modo = "foco"           # "foco" ou "pausa"
+    st.session_state.pomodoro_inicio = None
+    st.session_state.pomodoro_ciclos = 0               # ciclos de foco concluídos
+    st.session_state.pomodoro_pausada_restante = None  # segundos restantes quando pausado manualmente
+    st.session_state.pomodoro_duracao_foco = 25
+    st.session_state.pomodoro_duracao_pausa = 5
+    st.session_state.pomodoro_duracao_pausa_longa = 15
+
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 URL_PLANILHA = st.secrets["spreadsheet"]
 
@@ -234,10 +267,12 @@ URL_PLANILHA = st.secrets["spreadsheet"]
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def carregar_dados():
     try:
-        # ttl=0 obriga a ler a planilha em tempo real sempre
-        df = conn.read(spreadsheet=URL_PLANILHA, worksheet="Página1", ttl=0)
+        # ttl=30: reaproveita a leitura por 30s em vez de bater na API do Sheets
+        # a cada rerun (evita estourar a cota de "Read requests per minute").
+        df = conn.read(spreadsheet=URL_PLANILHA, worksheet="Página1", ttl=30)
         # Limpa linhas vazias caso o Sheets crie acidentalmente
         df = df.dropna(subset=["Data", "Assunto"])
         return df
@@ -269,14 +304,56 @@ def gerar_checklist_inicial():
     return pd.DataFrame(linhas)
 
 
-def carregar_checklist():
-    """Lê a aba 'Checklist'. Se não existir ou estiver vazia/desatualizada, cria com base no CRONOGRAMA."""
+def _normaliza_concluido(serie):
+    """Converte a coluna Concluido (que pode vir como bool, 'TRUE'/'FALSE', 1/0, NaN...) para bool de forma robusta."""
+    return (
+        serie.astype(str).str.strip().str.lower()
+        .isin(["true", "1", "1.0", "sim", "verdadeiro", "yes"])
+    )
+
+
+def _worksheet_existe(nome_aba):
+    """Tenta ler a aba; retorna True se existir (mesmo vazia), False se não existir."""
     try:
-        df_check = conn.read(spreadsheet=URL_PLANILHA, worksheet="Checklist", ttl=0)
-        if df_check.empty or "ID" not in df_check.columns:
-            raise ValueError("Aba Checklist vazia ou sem a coluna ID")
-        df_check["Concluido"] = df_check["Concluido"].astype(str).str.lower().isin(["true", "1", "sim", "verdadeiro"])
-        # Garante que novas tarefas adicionadas ao CRONOGRAMA (ex: você editou o script) entrem na planilha
+        conn.read(spreadsheet=URL_PLANILHA, worksheet=nome_aba, ttl=15)
+        return True
+    except Exception:
+        return False
+
+
+def carregar_checklist():
+    """Lê a aba 'Checklist'. Se não existir, CRIA (conn.create) com base no CRONOGRAMA.
+    Se existir mas faltar alguma tarefa nova, completa com UPDATE (conn.update)."""
+    aba_existe = _worksheet_existe("Checklist")
+
+    if not aba_existe:
+        # Primeira vez: a aba precisa ser CRIADA, não atualizada — conn.update() falha
+        # silenciosamente (ou lança erro) em abas que ainda não existem.
+        df_inicial = gerar_checklist_inicial()
+        try:
+            conn.create(spreadsheet=URL_PLANILHA, worksheet="Checklist", data=df_inicial)
+            st.toast("Aba 'Checklist' criada no Google Sheets ✅")
+        except Exception as e:
+            st.warning(
+                f"Não consegui criar a aba 'Checklist' automaticamente ({e}). "
+                "Crie manualmente uma aba chamada 'Checklist' na planilha (pode deixar em branco) "
+                "e recarregue a página — o app preenche o conteúdo sozinho na próxima carga."
+            )
+        return df_inicial
+
+    # A aba já existe — lê o progresso salvo
+    try:
+        df_check = conn.read(spreadsheet=URL_PLANILHA, worksheet="Checklist", ttl=15)
+        df_check = df_check.dropna(subset=["ID"])
+        df_check["ID"] = df_check["ID"].astype(str).str.strip()
+        df_check["Semana"] = pd.to_numeric(df_check["Semana"], errors="coerce").astype("Int64")
+        df_check["Concluido"] = _normaliza_concluido(df_check["Concluido"])
+        if "DataConclusao" not in df_check.columns:
+            df_check["DataConclusao"] = ""
+        df_check["DataConclusao"] = df_check["DataConclusao"].fillna("")
+
+        # Garante que novas tarefas adicionadas ao CRONOGRAMA (ex: você editou o script) entrem na planilha,
+        # SEM apagar o progresso já salvo das tarefas existentes.
         ids_existentes = set(df_check["ID"])
         ids_atuais = {t[0] for s in CRONOGRAMA for t in s["tarefas"]}
         ids_faltando = ids_atuais - ids_existentes
@@ -286,16 +363,9 @@ def carregar_checklist():
             df_check = pd.concat([df_check, df_novo], ignore_index=True)
             conn.update(spreadsheet=URL_PLANILHA, worksheet="Checklist", data=df_check)
         return df_check
-    except Exception:
-        df_inicial = gerar_checklist_inicial()
-        try:
-            conn.update(spreadsheet=URL_PLANILHA, worksheet="Checklist", data=df_inicial)
-        except Exception as e:
-            st.warning(
-                f"Não consegui criar a aba 'Checklist' automaticamente ({e}). "
-                "Crie manualmente uma aba chamada 'Checklist' na planilha e recarregue a página."
-            )
-        return df_inicial
+    except Exception as e:
+        st.warning(f"Erro ao ler a aba 'Checklist' ({e}). Recriando localmente a partir do cronograma padrão.")
+        return gerar_checklist_inicial()
 
 
 if "checklist_df" not in st.session_state:
@@ -314,7 +384,15 @@ def marcar_tarefa(tarefa_id):
 
 
 def salvar_checklist():
-    conn.update(spreadsheet=URL_PLANILHA, worksheet="Checklist", data=st.session_state.checklist_df)
+    """Grava o progresso atual na aba 'Checklist'. Usa CREATE se a aba ainda não existir
+    (ex.: foi apagada manualmente) e UPDATE no caso normal."""
+    df_para_salvar = st.session_state.checklist_df.copy()
+    # Grava o booleano como texto explícito para evitar ambiguidade na volta da leitura
+    df_para_salvar["Concluido"] = df_para_salvar["Concluido"].map({True: "TRUE", False: "FALSE"})
+    if _worksheet_existe("Checklist"):
+        conn.update(spreadsheet=URL_PLANILHA, worksheet="Checklist", data=df_para_salvar)
+    else:
+        conn.create(spreadsheet=URL_PLANILHA, worksheet="Checklist", data=df_para_salvar)
     st.session_state.checklist_salvo = True
 
 
@@ -455,6 +533,131 @@ elif st.session_state.horas_cronometradas > 0:
 st.sidebar.divider()
 
 # ==========================================
+# BARRA LATERAL: TIMER POMODORO
+# ==========================================
+def _pomodoro_duracao_modo_segundos():
+    """Duração (em segundos) do modo atual do pomodoro (foco, pausa curta ou pausa longa)."""
+    if st.session_state.pomodoro_modo == "foco":
+        return st.session_state.pomodoro_duracao_foco * 60
+    if st.session_state.pomodoro_ciclos > 0 and st.session_state.pomodoro_ciclos % 4 == 0:
+        return st.session_state.pomodoro_duracao_pausa_longa * 60
+    return st.session_state.pomodoro_duracao_pausa * 60
+
+
+def _pomodoro_iniciar():
+    st.session_state.pomodoro_ativo = True
+    if st.session_state.pomodoro_pausada_restante is not None:
+        # Retoma de onde parou, recalculando um "início" que já reflete o tempo decorrido
+        decorrido_ja = _pomodoro_duracao_modo_segundos() - st.session_state.pomodoro_pausada_restante
+        st.session_state.pomodoro_inicio = datetime.now() - timedelta(seconds=decorrido_ja)
+        st.session_state.pomodoro_pausada_restante = None
+    else:
+        st.session_state.pomodoro_inicio = datetime.now()
+
+
+def _pomodoro_pausar():
+    decorrido = (datetime.now() - st.session_state.pomodoro_inicio).total_seconds()
+    st.session_state.pomodoro_pausada_restante = max(0.0, _pomodoro_duracao_modo_segundos() - decorrido)
+    st.session_state.pomodoro_ativo = False
+
+
+def _pomodoro_resetar():
+    st.session_state.pomodoro_ativo = False
+    st.session_state.pomodoro_modo = "foco"
+    st.session_state.pomodoro_inicio = None
+    st.session_state.pomodoro_ciclos = 0
+    st.session_state.pomodoro_pausada_restante = None
+
+
+def _pomodoro_corpo():
+    """Todo o widget do Pomodoro. Quando o navegador suporta st.fragment, só ESTA
+    função reroda a cada segundo — o resto da página (planilha, gráficos,
+    cronograma) fica intocado, então carregar_dados() não é chamado de novo."""
+    st.sidebar.header("🍅 Timer Pomodoro")
+
+    with st.sidebar.expander("⚙️ Configurar ciclos", expanded=False):
+        st.session_state.pomodoro_duracao_foco = st.number_input(
+            "Foco (min)", min_value=1, value=st.session_state.pomodoro_duracao_foco,
+            step=1, disabled=st.session_state.pomodoro_ativo, key="pomo_cfg_foco",
+        )
+        st.session_state.pomodoro_duracao_pausa = st.number_input(
+            "Pausa curta (min)", min_value=1, value=st.session_state.pomodoro_duracao_pausa,
+            step=1, disabled=st.session_state.pomodoro_ativo, key="pomo_cfg_pausa",
+        )
+        st.session_state.pomodoro_duracao_pausa_longa = st.number_input(
+            "Pausa longa (min, a cada 4 ciclos)", min_value=1, value=st.session_state.pomodoro_duracao_pausa_longa,
+            step=1, disabled=st.session_state.pomodoro_ativo, key="pomo_cfg_pausa_longa",
+        )
+
+    col_pm1, col_pm2, col_pm3 = st.sidebar.columns(3)
+    if col_pm1.button("▶️", key="pomo_play", disabled=st.session_state.pomodoro_ativo, use_container_width=True):
+        _pomodoro_iniciar()
+        st.rerun()
+    if col_pm2.button("⏸️", key="pomo_pause", disabled=not st.session_state.pomodoro_ativo, use_container_width=True):
+        _pomodoro_pausar()
+        st.rerun()
+    if col_pm3.button("🔄", key="pomo_reset", use_container_width=True):
+        _pomodoro_resetar()
+        st.rerun()
+
+    duracao_modo_atual = _pomodoro_duracao_modo_segundos()
+
+    if st.session_state.pomodoro_ativo:
+        decorrido = (datetime.now() - st.session_state.pomodoro_inicio).total_seconds()
+        restante = duracao_modo_atual - decorrido
+
+        if restante <= 0:
+            # Fecha o ciclo atual e alterna automaticamente para o próximo modo
+            if st.session_state.pomodoro_modo == "foco":
+                st.session_state.pomodoro_ciclos += 1
+                # Soma o tempo de foco concluído ao "cronômetro" de horas, que já
+                # é usado para pré-preencher o formulário de registro de estudo
+                st.session_state.horas_cronometradas = round(
+                    st.session_state.horas_cronometradas + st.session_state.pomodoro_duracao_foco / 60, 2
+                )
+                st.session_state.pomodoro_modo = "pausa"
+                st.toast(f"🍅 Ciclo {st.session_state.pomodoro_ciclos} concluído! Hora da pausa.")
+            else:
+                st.session_state.pomodoro_modo = "foco"
+                st.toast("☕ Pausa concluída! De volta ao foco.")
+            st.session_state.pomodoro_inicio = datetime.now()
+            st.rerun()
+        else:
+            minutos_rest, segundos_rest = int(restante // 60), int(restante % 60)
+            rotulo_modo = "🎯 Foco" if st.session_state.pomodoro_modo == "foco" else "☕ Pausa"
+            st.sidebar.metric(rotulo_modo, f"{minutos_rest:02d}:{segundos_rest:02d}")
+            st.sidebar.progress(min(1.0, max(0.0, 1 - (restante / duracao_modo_atual))) if duracao_modo_atual else 0.0)
+    elif st.session_state.pomodoro_pausada_restante is not None:
+        minutos_rest = int(st.session_state.pomodoro_pausada_restante // 60)
+        segundos_rest = int(st.session_state.pomodoro_pausada_restante % 60)
+        rotulo_modo = "🎯 Foco" if st.session_state.pomodoro_modo == "foco" else "☕ Pausa"
+        st.sidebar.metric(f"{rotulo_modo} (pausado)", f"{minutos_rest:02d}:{segundos_rest:02d}")
+    else:
+        st.sidebar.caption(f"Pronto para começar: {st.session_state.pomodoro_duracao_foco} min de foco")
+
+    st.sidebar.caption(f"🔁 Ciclos de foco concluídos: {st.session_state.pomodoro_ciclos}")
+
+    if st.session_state.pomodoro_ativo and _FRAGMENT_DECORATOR is None and not AUTOREFRESH_DISPONIVEL:
+        st.sidebar.button("🔄 Atualizar contagem", key="pomo_refresh_manual")
+
+    st.sidebar.divider()
+
+
+if _FRAGMENT_DECORATOR is not None:
+    # Fragmento nativo do Streamlit: só ele reroda sozinho a cada 1s enquanto
+    # ativo. Fora do modo ativo, run_every=None (não fica rodando à toa).
+    intervalo = 1 if st.session_state.pomodoro_ativo else None
+    _FRAGMENT_DECORATOR(run_every=intervalo)(_pomodoro_corpo)()
+else:
+    # Streamlit desatualizado (sem st.fragment/experimental_fragment): cai para
+    # o autorefresh de página inteira. carregar_dados() já está com cache de
+    # 30s, então isso não deve mais estourar a cota do Sheets — mas o ideal é
+    # atualizar o Streamlit (`pip install -U streamlit`) para ter os fragmentos.
+    _pomodoro_corpo()
+    if st.session_state.pomodoro_ativo and AUTOREFRESH_DISPONIVEL:
+        st_autorefresh(interval=1000, limit=None, key="pomodoro_autorefresh")
+
+# ==========================================
 # BARRA LATERAL: ENTRADA DE DADOS
 # ==========================================
 st.sidebar.header("Registrar Estudo")
@@ -509,6 +712,11 @@ if st.sidebar.button("🔄 Recarregar Checklist do Sheets", use_container_width=
     st.session_state.checklist_df = carregar_checklist()
     st.session_state.checklist_salvo = True
     st.sidebar.success("Checklist recarregado!")
+    st.rerun()
+
+if st.sidebar.button("📥 Atualizar Dados da Planilha Agora", use_container_width=True):
+    carregar_dados.clear()
+    st.sidebar.success("Cache limpo — dados atualizados!")
     st.rerun()
 
 # ==========================================
@@ -574,38 +782,85 @@ if not df.empty:
         st.divider()
 
         # ------------------------------------------
-        # 3. GRÁFICOS INTERATIVOS DE METAS E CATEGORIAS
+        # 3. GRÁFICOS — HORAS POR CATEGORIA E POR SEMANA
         # ------------------------------------------
-        st.subheader("🎯 Distribuição por Metas e Matérias")
+        st.subheader("🎯 Distribuição do Tempo de Estudo")
+        st.caption("Cores padronizadas: 🔵 ELET · 🔴 PORT · 🟢 ING · 🟣 SIM · ⚪ REV")
 
-        # Novo: Gráfico de Barras por Categoria
-        df_categoria = df.groupby("Categoria")["Horas"].sum().reset_index().sort_values(by="Horas", ascending=False)
-        fig_bar = px.bar(
-            df_categoria,
-            x='Categoria',
-            y='Horas',
-            text_auto='.2f',
-            color='Categoria',
-            title="Horas Totais por Categoria",
-            labels={'Horas': 'Horas Estudadas'}
-        )
-        fig_bar.update_traces(textfont_size=12, textangle=0, textposition="outside", cliponaxis=False)
-        st.plotly_chart(fig_bar, use_container_width=True)
+        col_g1, col_g2 = st.columns(2)
+
+        with col_g1:
+            # Horas por categoria — barra horizontal simples, ordenada, com % do total
+            df_categoria = df.groupby("Categoria")["Horas"].sum().reset_index()
+            total_horas_cat = df_categoria["Horas"].sum()
+            df_categoria["Rotulo"] = df_categoria.apply(
+                lambda r: f"{r['Horas']:.1f}h ({r['Horas'] / total_horas_cat:.0%})" if total_horas_cat else "0h", axis=1
+            )
+            df_categoria = df_categoria.sort_values("Horas", ascending=True)
+            fig_bar = px.bar(
+                df_categoria, x="Horas", y="Categoria", orientation="h",
+                color="Categoria", color_discrete_map=CORES_CATEGORIA,
+                text="Rotulo", title="Horas por Categoria",
+            )
+            fig_bar.update_traces(textposition="outside", cliponaxis=False)
+            fig_bar.update_layout(showlegend=False, xaxis_title="Horas", yaxis_title=None)
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        with col_g2:
+            # Horas por semana, empilhado por categoria — substitui o sunburst antigo
+            df_sem = df.copy()
+            df_sem["SemanaNum"] = df_sem["Meta"].apply(extrai_semana_num)
+            df_sem_agrupado = df_sem.groupby(["SemanaNum", "Meta", "Categoria"])["Horas"].sum().reset_index()
+            ordem_semanas = (
+                df_sem_agrupado.drop_duplicates("SemanaNum").sort_values("SemanaNum")["Meta"].tolist()
+            )
+            fig_semana = px.bar(
+                df_sem_agrupado, x="Horas", y="Meta", color="Categoria", orientation="h",
+                color_discrete_map=CORES_CATEGORIA,
+                category_orders={"Meta": ordem_semanas},
+                title="Horas por Semana (empilhado por categoria)",
+            )
+            fig_semana.update_layout(yaxis_title=None, xaxis_title="Horas", legend_title="Categoria")
+            st.plotly_chart(fig_semana, use_container_width=True)
 
         st.divider()
 
-        # Tabela e Sunburst originais
+        # ------------------------------------------
+        # 4. EVOLUÇÃO ACUMULADA — ritmo de estudo x tempo
+        # ------------------------------------------
+        st.subheader("📈 Evolução do Tempo de Estudo")
+        df_evolucao = df.groupby(df["Data"].dt.date)["Horas"].sum().reset_index()
+        df_evolucao.columns = ["Data", "Horas"]
+        df_evolucao = df_evolucao.sort_values("Data")
+        df_evolucao["Acumulado"] = df_evolucao["Horas"].cumsum()
+        fig_linha = px.line(
+            df_evolucao, x="Data", y="Acumulado", markers=True,
+            title="Horas Acumuladas ao Longo do Tempo",
+        )
+        fig_linha.update_layout(yaxis_title="Horas acumuladas", xaxis_title=None)
+        fig_linha.add_vline(
+            x=DATA_PROVA.strftime("%Y-%m-%d"), line_dash="dash", line_color="red",
+            annotation_text="Prova (30/11)", annotation_position="top right",
+        )
+        st.plotly_chart(fig_linha, use_container_width=True)
+
+        st.divider()
+
+        # ------------------------------------------
+        # 5. TABELA DETALHADA — com filtro por semana (substitui o drill-down do sunburst)
+        # ------------------------------------------
+        st.subheader("🔍 Detalhamento por Semana e Assunto")
+        semanas_disponiveis = sorted(df_sem["Meta"].dropna().unique(), key=extrai_semana_num)
+        semana_filtro = st.selectbox("Filtrar por semana", ["Todas as semanas"] + semanas_disponiveis)
+
         df_agrupado = df.groupby(["Meta", "Categoria", "Assunto"])["Horas"].sum().reset_index()
+        if semana_filtro != "Todas as semanas":
+            df_agrupado = df_agrupado[df_agrupado["Meta"] == semana_filtro]
 
-        col1, col2 = st.columns([1, 1.5])
-        with col1:
-            st.dataframe(df_agrupado.sort_values(by=["Meta", "Horas"], ascending=[True, False]), width='stretch', hide_index=True)
-
-        with col2:
-            fig_sun = px.sunburst(df_agrupado, path=['Meta', 'Categoria', 'Assunto'], values='Horas', color='Categoria', title="Detalhamento das Metas")
-            fig_sun.update_traces(textinfo="label+value")
-            fig_sun.update_layout(margin=dict(t=30, l=0, r=0, b=0))
-            st.plotly_chart(fig_sun, use_container_width=True)
+        st.dataframe(
+            df_agrupado.sort_values(by=["Meta", "Horas"], ascending=[True, False]),
+            width='stretch', hide_index=True,
+        )
 
     else:
         st.info("Nenhum estudo registrado neste intervalo.")
